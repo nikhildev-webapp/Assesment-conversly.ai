@@ -1,0 +1,196 @@
+const API_URL = 'https://fakestoreapi.com/products';
+const appRoot = document.getElementById('app');
+
+const state = {
+  items: [],
+  query: '',
+  loading: false,
+  error: null,
+};
+
+function createElement(tag, { className = '', text = '', html = '', attributes = {} } = {}) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  if (html) element.innerHTML = html;
+  Object.entries(attributes).forEach(([key, value]) => {
+    element.setAttribute(key, value);
+  });
+  return element;
+}
+
+function setState(nextState) {
+  Object.assign(state, nextState);
+  renderApp();
+}
+
+function formatPrice(value) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+}
+
+function createHeader() {
+  const header = createElement('section', { className: 'app-header' });
+  header.appendChild(createElement('h1', { className: 'app-title', text: 'Browse trending products' }));
+  header.appendChild(
+    createElement('p', {
+      className: 'app-description',
+      text: 'Explore a curated list of products from a public dataset. Use the search bar to filter by name, category, or description and discover items across categories.',
+    })
+  );
+  return header;
+}
+
+function createSearchPanel() {
+  const panel = createElement('section', { className: 'search-panel' });
+  const searchLabel = createElement('label', { className: 'search-label', text: 'Search products' });
+  searchLabel.setAttribute('for', 'search-input');
+
+  const searchInput = createElement('input', {
+    className: 'search-input',
+    attributes: {
+      id: 'search-input',
+      type: 'search',
+      placeholder: 'Search by title, category, or description',
+      autocomplete: 'off',
+      'aria-label': 'Search products',
+    },
+  });
+  searchInput.value = state.query;
+
+  searchInput.addEventListener('input', (event) => {
+    const query = event.target.value.trim();
+    setState({ query });
+  });
+
+  panel.appendChild(searchLabel);
+  panel.appendChild(searchInput);
+  return panel;
+}
+
+function createStatusBanner() {
+  if (state.loading) {
+    const loading = createElement('div', { className: 'status-banner' });
+    loading.innerHTML = '<strong>Loading</strong> fetching products from the API...';
+    return loading;
+  }
+
+  if (state.error) {
+    const error = createElement('div', { className: 'status-banner' });
+    error.innerHTML = '<strong>Unable to load items:</strong> ' + state.error;
+    return error;
+  }
+
+  const itemCount = createElement('div', { className: 'status-banner' });
+  const filtered = getFilteredItems();
+  itemCount.innerHTML = '<strong>' + filtered.length + '</strong> products available' + (state.query ? ' for "' + state.query + '"' : '');
+  return itemCount;
+}
+
+function createItemCard(product) {
+  const card = createElement('article', { className: 'item-card' });
+
+  const imageWrapper = createElement('div', { className: 'item-image-wrapper' });
+  const img = createElement('img', {
+    className: 'item-image',
+    attributes: {
+      src: product.image,
+      alt: product.title,
+      loading: 'lazy',
+    },
+  });
+  imageWrapper.appendChild(img);
+
+  const body = createElement('div', { className: 'item-body' });
+  const title = createElement('h2', { className: 'item-title', text: product.title });
+  const meta = createElement('div', {
+    className: 'item-meta',
+    html: '<span>' + product.category + '</span><span>' + formatPrice(product.price) + '</span>',
+  });
+  const description = createElement('p', {
+    className: 'item-description',
+    text: product.description.length > 120 ? product.description.slice(0, 120) + '…' : product.description,
+  });
+
+  const footer = createElement('div', { className: 'item-footer' });
+  const rating = createElement('span', {
+    className: 'item-rating',
+    text: product.rating.rate.toFixed(1) + ' ★ (' + product.rating.count + ')',
+  });
+  footer.appendChild(rating);
+
+  body.appendChild(title);
+  body.appendChild(meta);
+  body.appendChild(description);
+  body.appendChild(footer);
+
+  card.appendChild(imageWrapper);
+  card.appendChild(body);
+  return card;
+}
+
+function getFilteredItems() {
+  if (!state.query) {
+    return state.items;
+  }
+
+  const query = state.query.toLowerCase();
+  return state.items.filter((item) => {
+    return [item.title, item.category, item.description].some((field) =>
+      field.toLowerCase().includes(query)
+    );
+  });
+}
+
+function createItemGrid() {
+  const gridContainer = createElement('section');
+  if (state.loading || state.error) {
+    return gridContainer;
+  }
+
+  const filteredItems = getFilteredItems();
+  if (filteredItems.length === 0) {
+    const emptyState = createElement('div', { className: 'no-results', text: 'No products matched your search. Try a different term.' });
+    gridContainer.appendChild(emptyState);
+    return gridContainer;
+  }
+
+  const grid = createElement('div', { className: 'item-grid' });
+  filteredItems.forEach((product) => grid.appendChild(createItemCard(product)));
+  gridContainer.appendChild(grid);
+  return gridContainer;
+}
+
+function renderApp() {
+  if (!appRoot) return;
+  appRoot.innerHTML = '';
+
+  appRoot.appendChild(createHeader());
+  appRoot.appendChild(createSearchPanel());
+  appRoot.appendChild(createStatusBanner());
+  appRoot.appendChild(createItemGrid());
+}
+
+async function loadProducts() {
+  setState({ loading: true, error: null });
+
+  try {
+    const response = await fetch(API_URL);
+    if (!response.ok) {
+      throw new Error('API error ' + response.status);
+    }
+
+    const products = await response.json();
+    if (!Array.isArray(products)) {
+      throw new Error('Unexpected API response');
+    }
+
+    setState({ items: products, loading: false });
+  } catch (error) {
+    setState({ loading: false, error: error.message || 'Network error occurred' });
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  renderApp();
+  loadProducts();
+});
