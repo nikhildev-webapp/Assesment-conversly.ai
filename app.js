@@ -2,6 +2,8 @@ const API_URL = 'https://fakestoreapi.com/products';
 const appRoot = document.getElementById('app');
 const dom = {
   searchInput: null,
+  clearButton: null,
+  refreshButton: null,
   statusBanner: null,
   gridSection: null,
 };
@@ -13,7 +15,7 @@ const state = {
   error: null,
 };
 
-function createElement(tag, { className = '', text = '', html = '', attributes = {} } = {}) {
+function createElement(tag, { className = '', text = '', html = '', attributes = {}, dataset = {} } = {}) {
   const element = document.createElement(tag);
   if (className) element.className = className;
   if (text) element.textContent = text;
@@ -21,7 +23,18 @@ function createElement(tag, { className = '', text = '', html = '', attributes =
   Object.entries(attributes).forEach(([key, value]) => {
     element.setAttribute(key, value);
   });
+  Object.entries(dataset).forEach(([key, value]) => {
+    element.dataset[key] = value;
+  });
   return element;
+}
+
+function debounce(fn, delay = 180) {
+  let timeoutId;
+  return (...args) => {
+    clearTimeout(timeoutId);
+    timeoutId = window.setTimeout(() => fn(...args), delay);
+  };
 }
 
 function setState(nextState) {
@@ -33,13 +46,18 @@ function formatPrice(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
+function truncate(text, maxLength) {
+  const normalized = String(text || '');
+  return normalized.length > maxLength ? normalized.slice(0, maxLength).trim() + '…' : normalized;
+}
+
 function createHeader() {
   const header = createElement('section', { className: 'app-header' });
   header.appendChild(createElement('h1', { className: 'app-title', text: 'Browse trending products' }));
   header.appendChild(
     createElement('p', {
       className: 'app-description',
-      text: 'Explore a curated list of products from a public dataset. Use the search bar to filter by name, category, or description and discover items across categories.',
+      text: 'Explore a curated list of products from a public dataset. Use the search bar to filter by title, category, or description and find the perfect item.',
     })
   );
   return header;
@@ -47,8 +65,8 @@ function createHeader() {
 
 function createSearchPanel() {
   const panel = createElement('section', { className: 'search-panel' });
-  const searchLabel = createElement('label', { className: 'search-label', text: 'Search products' });
-  searchLabel.setAttribute('for', 'search-input');
+  const label = createElement('label', { className: 'search-label', text: 'Search products' });
+  label.setAttribute('for', 'search-input');
 
   const searchInput = createElement('input', {
     className: 'search-input',
@@ -60,16 +78,45 @@ function createSearchPanel() {
       'aria-label': 'Search products',
     },
   });
-  searchInput.value = state.query;
 
-  searchInput.addEventListener('input', (event) => {
-    const query = event.target.value.trim();
-    setState({ query });
+  const actions = createElement('div', { className: 'search-actions' });
+  const clearButton = createElement('button', {
+    className: 'button button--secondary',
+    text: 'Clear',
+    attributes: { type: 'button' },
+  });
+  const refreshButton = createElement('button', {
+    className: 'button',
+    text: 'Refresh products',
+    attributes: { type: 'button' },
+  });
+
+  searchInput.addEventListener(
+    'input',
+    debounce((event) => {
+      setState({ query: event.target.value.trim() });
+    })
+  );
+
+  clearButton.addEventListener('click', () => {
+    setState({ query: '' });
+    searchInput.focus();
+  });
+
+  refreshButton.addEventListener('click', () => {
+    loadProducts();
   });
 
   dom.searchInput = searchInput;
-  panel.appendChild(searchLabel);
+  dom.clearButton = clearButton;
+  dom.refreshButton = refreshButton;
+
+  actions.appendChild(clearButton);
+  actions.appendChild(refreshButton);
+
+  panel.appendChild(label);
   panel.appendChild(searchInput);
+  panel.appendChild(actions);
   return panel;
 }
 
@@ -105,11 +152,13 @@ function createItemCard(product) {
   const title = createElement('h2', { className: 'item-title', text: product.title || 'Untitled product' });
   const meta = createElement('div', {
     className: 'item-meta',
-    html: '<span>' + (product.category || 'Unknown category') + '</span><span>' + formatPrice(product.price || 0) + '</span>',
+    html:
+      '<span>' + (product.category || 'Unknown category') + '</span>' +
+      '<span>' + formatPrice(product.price || 0) + '</span>',
   });
   const description = createElement('p', {
     className: 'item-description',
-    text: String(product.description || 'No description available.').slice(0, 120) + (product.description && product.description.length > 120 ? '…' : ''),
+    text: truncate(product.description || 'No description available.', 120),
   });
 
   const footer = createElement('div', { className: 'item-footer' });
@@ -131,42 +180,99 @@ function createItemCard(product) {
   return card;
 }
 
+function createStatusBanner() {
+  return createElement('div', {
+    className: 'status-banner',
+    attributes: { 'aria-live': 'polite', 'aria-atomic': 'true' },
+  });
+}
+
+function createGridSection() {
+  return createElement('section', { className: 'grid-panel' });
+}
+
+function createLoadingGrid(count) {
+  const grid = createElement('div', { className: 'item-grid loading' });
+  for (let index = 0; index < count; index += 1) {
+    const card = createElement('article', { className: 'item-card skeleton' });
+    card.appendChild(createElement('div', { className: 'item-image-wrapper skeleton-box' }));
+    const body = createElement('div', { className: 'item-body' });
+    body.appendChild(createElement('div', { className: 'skeleton-line skeleton-heading' }));
+    body.appendChild(createElement('div', { className: 'skeleton-line' }));
+    body.appendChild(createElement('div', { className: 'skeleton-line' }));
+    body.appendChild(createElement('div', { className: 'skeleton-line skeleton-small' }));
+    card.appendChild(body);
+    grid.appendChild(card);
+  }
+  return grid;
+}
+
 function renderStatusBanner() {
   if (!dom.statusBanner) return;
 
   dom.statusBanner.className = 'status-banner';
   if (state.loading) {
-    dom.statusBanner.innerHTML = '<strong>Loading</strong> fetching products from the API...';
+    dom.statusBanner.innerHTML = '<span class="spinner" aria-hidden="true"></span><strong>Loading</strong> fetching products...';
     return;
   }
 
   if (state.error) {
     dom.statusBanner.classList.add('error-state');
-    dom.statusBanner.innerHTML = '<strong>Unable to load items:</strong> ' + state.error;
+    dom.statusBanner.innerHTML =
+      '<strong>Unable to load items:</strong> ' +
+      state.error +
+      ' <button class="button button--secondary" type="button" id="retry-button">Retry</button>';
+
+    const retryButton = dom.statusBanner.querySelector('#retry-button');
+    if (retryButton) {
+      retryButton.addEventListener('click', loadProducts);
+    }
     return;
   }
 
   const filtered = getFilteredItems();
-  dom.statusBanner.innerHTML = '<strong>' + filtered.length + '</strong> products available' + (state.query ? ' for "' + state.query + '"' : '');
+  const count = filtered.length;
+  dom.statusBanner.innerHTML =
+    '<strong>' +
+    count +
+    '</strong> product' +
+    (count === 1 ? '' : 's') +
+    ' available' +
+    (state.query ? ' for "' + state.query + '"' : '');
 }
 
 function renderItemGrid() {
   if (!dom.gridSection) return;
 
   dom.gridSection.innerHTML = '';
-  if (state.loading || state.error) {
+  if (state.loading) {
+    dom.gridSection.appendChild(createLoadingGrid(8));
     return;
   }
 
-  const filteredItems = getFilteredItems();
-  if (filteredItems.length === 0) {
-    const emptyState = createElement('div', { className: 'no-results', text: 'No products matched your search. Try a different term.' });
-    dom.gridSection.appendChild(emptyState);
+  if (state.error) {
+    dom.gridSection.appendChild(
+      createElement('div', {
+        className: 'error-state',
+        text: 'Unable to show products while the API request failed. Try refreshing the list.',
+      })
+    );
+    return;
+  }
+
+  const filtered = getFilteredItems();
+  if (!filtered.length) {
+    dom.gridSection.appendChild(
+      createElement('div', {
+        className: 'no-results',
+        text: 'No products matched your search. Try a different keyword.',
+      })
+    );
     return;
   }
 
   const grid = createElement('div', { className: 'item-grid' });
-  filteredItems.forEach((product) => grid.appendChild(createItemCard(product)));
+  filtered.forEach((product) => grid.appendChild(createItemCard(product)));
   dom.gridSection.appendChild(grid);
 }
 
@@ -176,19 +282,19 @@ function initializeApp() {
   appRoot.innerHTML = '';
   appRoot.appendChild(createHeader());
   appRoot.appendChild(createSearchPanel());
-
-  dom.statusBanner = createElement('div', { className: 'status-banner' });
-  dom.gridSection = createElement('section');
-
+  dom.statusBanner = createStatusBanner();
+  dom.gridSection = createGridSection();
   appRoot.appendChild(dom.statusBanner);
   appRoot.appendChild(dom.gridSection);
-
   updateUI();
 }
 
 function updateUI() {
   if (dom.searchInput) {
     dom.searchInput.value = state.query;
+  }
+  if (dom.clearButton) {
+    dom.clearButton.disabled = !state.query;
   }
   renderStatusBanner();
   renderItemGrid();
@@ -198,9 +304,9 @@ async function loadProducts() {
   setState({ loading: true, error: null });
 
   try {
-    const response = await fetch(API_URL);
+    const response = await fetch(API_URL, { cache: 'no-cache' });
     if (!response.ok) {
-      throw new Error('API error ' + response.status);
+      throw new Error('API returned ' + response.status);
     }
 
     const products = await response.json();
@@ -208,7 +314,7 @@ async function loadProducts() {
       throw new Error('Unexpected API response');
     }
 
-    setState({ items: products, loading: false });
+    setState({ items: products, loading: false, error: null });
   } catch (error) {
     setState({ loading: false, error: error.message || 'Network error occurred' });
   }
