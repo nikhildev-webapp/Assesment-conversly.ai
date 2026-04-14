@@ -1,5 +1,10 @@
 const API_URL = 'https://fakestoreapi.com/products';
 const appRoot = document.getElementById('app');
+const dom = {
+  searchInput: null,
+  statusBanner: null,
+  gridSection: null,
+};
 
 const state = {
   items: [],
@@ -21,7 +26,7 @@ function createElement(tag, { className = '', text = '', html = '', attributes =
 
 function setState(nextState) {
   Object.assign(state, nextState);
-  renderApp();
+  updateUI();
 }
 
 function formatPrice(value) {
@@ -62,28 +67,24 @@ function createSearchPanel() {
     setState({ query });
   });
 
+  dom.searchInput = searchInput;
   panel.appendChild(searchLabel);
   panel.appendChild(searchInput);
   return panel;
 }
 
-function createStatusBanner() {
-  if (state.loading) {
-    const loading = createElement('div', { className: 'status-banner' });
-    loading.innerHTML = '<strong>Loading</strong> fetching products from the API...';
-    return loading;
+function getFilteredItems() {
+  if (!state.query) {
+    return state.items;
   }
 
-  if (state.error) {
-    const error = createElement('div', { className: 'status-banner' });
-    error.innerHTML = '<strong>Unable to load items:</strong> ' + state.error;
-    return error;
-  }
-
-  const itemCount = createElement('div', { className: 'status-banner' });
-  const filtered = getFilteredItems();
-  itemCount.innerHTML = '<strong>' + filtered.length + '</strong> products available' + (state.query ? ' for "' + state.query + '"' : '');
-  return itemCount;
+  const query = state.query.toLowerCase();
+  return state.items.filter((item) => {
+    const title = String(item.title || '');
+    const category = String(item.category || '');
+    const description = String(item.description || '');
+    return [title, category, description].some((field) => field.toLowerCase().includes(query));
+  });
 }
 
 function createItemCard(product) {
@@ -93,28 +94,30 @@ function createItemCard(product) {
   const img = createElement('img', {
     className: 'item-image',
     attributes: {
-      src: product.image,
-      alt: product.title,
+      src: product.image || '',
+      alt: product.title || 'Product image',
       loading: 'lazy',
     },
   });
   imageWrapper.appendChild(img);
 
   const body = createElement('div', { className: 'item-body' });
-  const title = createElement('h2', { className: 'item-title', text: product.title });
+  const title = createElement('h2', { className: 'item-title', text: product.title || 'Untitled product' });
   const meta = createElement('div', {
     className: 'item-meta',
-    html: '<span>' + product.category + '</span><span>' + formatPrice(product.price) + '</span>',
+    html: '<span>' + (product.category || 'Unknown category') + '</span><span>' + formatPrice(product.price || 0) + '</span>',
   });
   const description = createElement('p', {
     className: 'item-description',
-    text: product.description.length > 120 ? product.description.slice(0, 120) + '…' : product.description,
+    text: String(product.description || 'No description available.').slice(0, 120) + (product.description && product.description.length > 120 ? '…' : ''),
   });
 
   const footer = createElement('div', { className: 'item-footer' });
+  const ratingValue = typeof product.rating?.rate === 'number' ? product.rating.rate.toFixed(1) : 'N/A';
+  const ratingCount = typeof product.rating?.count === 'number' ? product.rating.count : '0';
   const rating = createElement('span', {
     className: 'item-rating',
-    text: product.rating.rate.toFixed(1) + ' ★ (' + product.rating.count + ')',
+    text: ratingValue + ' ★ (' + ratingCount + ')',
   });
   footer.appendChild(rating);
 
@@ -128,46 +131,67 @@ function createItemCard(product) {
   return card;
 }
 
-function getFilteredItems() {
-  if (!state.query) {
-    return state.items;
+function renderStatusBanner() {
+  if (!dom.statusBanner) return;
+
+  dom.statusBanner.className = 'status-banner';
+  if (state.loading) {
+    dom.statusBanner.innerHTML = '<strong>Loading</strong> fetching products from the API...';
+    return;
   }
 
-  const query = state.query.toLowerCase();
-  return state.items.filter((item) => {
-    return [item.title, item.category, item.description].some((field) =>
-      field.toLowerCase().includes(query)
-    );
-  });
+  if (state.error) {
+    dom.statusBanner.classList.add('error-state');
+    dom.statusBanner.innerHTML = '<strong>Unable to load items:</strong> ' + state.error;
+    return;
+  }
+
+  const filtered = getFilteredItems();
+  dom.statusBanner.innerHTML = '<strong>' + filtered.length + '</strong> products available' + (state.query ? ' for "' + state.query + '"' : '');
 }
 
-function createItemGrid() {
-  const gridContainer = createElement('section');
+function renderItemGrid() {
+  if (!dom.gridSection) return;
+
+  dom.gridSection.innerHTML = '';
   if (state.loading || state.error) {
-    return gridContainer;
+    return;
   }
 
   const filteredItems = getFilteredItems();
   if (filteredItems.length === 0) {
     const emptyState = createElement('div', { className: 'no-results', text: 'No products matched your search. Try a different term.' });
-    gridContainer.appendChild(emptyState);
-    return gridContainer;
+    dom.gridSection.appendChild(emptyState);
+    return;
   }
 
   const grid = createElement('div', { className: 'item-grid' });
   filteredItems.forEach((product) => grid.appendChild(createItemCard(product)));
-  gridContainer.appendChild(grid);
-  return gridContainer;
+  dom.gridSection.appendChild(grid);
 }
 
-function renderApp() {
+function initializeApp() {
   if (!appRoot) return;
-  appRoot.innerHTML = '';
 
+  appRoot.innerHTML = '';
   appRoot.appendChild(createHeader());
   appRoot.appendChild(createSearchPanel());
-  appRoot.appendChild(createStatusBanner());
-  appRoot.appendChild(createItemGrid());
+
+  dom.statusBanner = createElement('div', { className: 'status-banner' });
+  dom.gridSection = createElement('section');
+
+  appRoot.appendChild(dom.statusBanner);
+  appRoot.appendChild(dom.gridSection);
+
+  updateUI();
+}
+
+function updateUI() {
+  if (dom.searchInput) {
+    dom.searchInput.value = state.query;
+  }
+  renderStatusBanner();
+  renderItemGrid();
 }
 
 async function loadProducts() {
@@ -191,6 +215,6 @@ async function loadProducts() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  renderApp();
+  initializeApp();
   loadProducts();
 });
